@@ -19,7 +19,7 @@ import xml.etree.ElementTree as E
 nodes=list(E.parse('build/device-smoke/ui.xml').iter('node'))
 for label in ['Jelly Dolphin','Shake','Reset']:
  assert any(n.get('text')==label for n in nodes),label+' missing'
-for label in ['Gravity','Squishiness, firm to extra jelly']:
+for label in ['Gravity','Squishiness, firm to extra jelly','Jelly clarity, cloudy to clear']:
  assert any(n.get('content-desc')==label for n in nodes),label+' missing'
 print('PASS: native UI and controls present')
 PY

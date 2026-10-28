@@ -1,5 +1,5 @@
 """Rasterize the Java renderer's captured frame using real headless Mesa GLES 2."""
-import ctypes as C, os, pathlib
+import ctypes as C, os, pathlib, json
 os.environ.setdefault('EGL_PLATFORM','surfaceless')
 os.environ.setdefault('MESA_SHADER_CACHE_DIR','/tmp/jelly-mesa-cache')
 from PIL import Image
@@ -40,9 +40,37 @@ vbo=U();gl('glGenBuffers',None,I,C.POINTER(U))(1,C.byref(vbo));gl('glBindBuffer'
 for index,name in enumerate([b'aPosition',b'aNormal',b'aColour']):
  loc=gl('glGetAttribLocation',I,U,C.c_char_p)(program,name);gl('glEnableVertexAttribArray',None,U)(loc);gl('glVertexAttribPointer',None,U,I,U,U,I,P)(loc,3,0x1406,0,36,C.c_void_p(index*12))
 gl('glEnable',None,U)(0x0B71);gl('glEnable',None,U)(2884);gl('glViewport',None,I,I,I,I)(0,0,720,800);gl('glClearColor',None,F,F,F,F)(.047,.105,.15,1);gl('glClear',None,U)(0x4100)
-gl('glDrawArrays',None,U,I,I)(4,0,len(vertices)//9);gl('glFinish',None)()
-assert gl('glGetError',U)()==0,'GLES rendering error'
-pixels=np.zeros((800,720,4),dtype=np.uint8);gl('glReadPixels',None,I,I,I,I,U,U,P)(0,0,720,800,0x1908,0x1401,pixels.ctypes.data)
+draws=json.loads(pathlib.Path('build/scene/draws.json').read_text())
+assert len(draws)==3 and not draws[0]['blend'] and all(d['blend'] and not d['depthWrite'] for d in draws[1:])
+assert [d['cull'] for d in draws[1:]]==[1028,1029], 'Jelly must render back then front'
+def render(clarity=None,skin=True):
+ gl('glDepthMask',None,U)(1)
+ gl('glClear',None,U)(0x4100)
+ for draw in draws:
+  if draw['jelly'] and not skin:continue
+  gl('glUniform1f',None,I,F)(get_uniform(program,b'uJelly'),draw['jelly'])
+  gl('glUniform1f',None,I,F)(get_uniform(program,b'uClarity'),draw['clarity'] if clarity is None else clarity)
+  (gl('glEnable',None,U) if draw['blend'] else gl('glDisable',None,U))(3042)
+  gl('glBlendFunc',None,U,U)(1,771)
+  gl('glDepthMask',None,U)(draw['depthWrite'])
+  gl('glCullFace',None,U)(draw['cull'])
+  gl('glDrawArrays',None,U,I,I)(4,draw['first'],draw['count'])
+ gl('glFinish',None)()
+ assert gl('glGetError',U)()==0,'GLES rendering error'
+ pixels=np.zeros((800,720,4),dtype=np.uint8)
+ gl('glReadPixels',None,I,I,I,I,U,U,P)(0,0,720,800,0x1908,0x1401,pixels.ctypes.data)
+ return pixels[::-1].copy()
+pixels=render()
 assert len(np.unique(pixels.reshape(-1,4),axis=0))>500,'Frame lacks expected shaded geometry'
-Image.fromarray(pixels[::-1]).save('build/scene/room.png')
-print('PASS: actual GLES shader compilation, geometry submission and shaded frame. build/scene/room.png')
+Image.fromarray(pixels).save('build/scene/room.png')
+cloudy,clear,background=render(0),render(1),render(skin=False)
+mask=np.linalg.norm(cloudy[:,:,:3].astype(float)-clear[:,:,:3],axis=2)>12
+assert mask.sum()>3000, 'Clarity must change real blended skin pixels'
+# Clear jelly must reveal more of the underlying room in the majority of affected pixels.
+d_clear=np.linalg.norm(clear[:,:,:3].astype(float)-background[:,:,:3],axis=2)
+d_cloudy=np.linalg.norm(cloudy[:,:,:3].astype(float)-background[:,:,:3],axis=2)
+assert np.mean(d_clear[mask]<d_cloudy[mask])>.65, 'Clear setting must transmit the background'
+assert (pixels[:,:,:3].max(axis=2)[mask]>150).sum()>100,'Jelly needs visible glossy highlights'
+Image.fromarray(cloudy).save('build/scene/room-cloudy.png')
+Image.fromarray(clear).save('build/scene/room-clear.png')
+print('PASS: GLES shaders, two-sided premultiplied transparency, clarity/background transmission and glossy highlights. build/scene/room.png')

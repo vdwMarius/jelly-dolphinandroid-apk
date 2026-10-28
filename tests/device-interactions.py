@@ -18,6 +18,9 @@ tap(find('content-desc','Lilac'))
 slider=find('content-desc','Squishiness, firm to extra jelly')
 a,b,c,d=bounds(slider)
 adb('shell','input','tap',str(int(a+(c-a)*.82)),str((b+d)//2))
+clarity=find('content-desc','Jelly clarity, cloudy to clear')
+a,b,c,d=bounds(clarity)
+adb('shell','input','tap',str(int(a+(c-a)*.8)),str((b+d)//2))
 g=find('content-desc','Gravity')
 if g.get('checked')!='true': tap(g)
 tap(find('text','Shake'))
@@ -34,7 +37,8 @@ prefs={el.get('name'):el.get('value') for el in root}
 assert prefs['colour']=='2',prefs
 assert float(prefs['softness'])>.7,prefs
 assert prefs['gravity']=='true',prefs
+assert float(prefs['clarity'])>.65,prefs
 assert find('content-desc','Lilac, selected').get('selected')=='true'
 assert find('content-desc','Gravity').get('checked')=='true'
 assert adb('shell','pidof','com.jellydolphin.app').strip()
-print('PASS: colour, softness, gravity, shake/reset, touch/drag injection, and relaunch persistence')
+print('PASS: colour, softness, clarity, gravity, shake/reset, touch/drag injection, and relaunch persistence')

@@ -11,8 +11,9 @@ public final class RoomRenderer implements GLSurfaceView.Renderer {
     public final SoftBody3D body=new SoftBody3D();
     public volatile int colour=0xFF76E8D0;
     public volatile float softness=.65f;
+    public volatile float clarity=.65f;
     public volatile boolean gravity=true;
-    private int program,positionLoc,normalLoc,colourLoc,matrixLoc,eyeLoc;
+    private int program,positionLoc,normalLoc,colourLoc,matrixLoc,eyeLoc,jellyLoc,clarityLoc;
     private final float[] projection=new float[16],view=new float[16],vp=new float[16],inverse=new float[16];
     private final float[] eye=new float[3];
     private final FloatBuffer buffer=ByteBuffer.allocateDirect(220000*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -29,10 +30,18 @@ public final class RoomRenderer implements GLSurfaceView.Renderer {
     private final float[][] sphere=makeSphere();
     @Override public void onSurfaceCreated(GL10 unused,EGLConfig config){
         String vertex="uniform mat4 uVP; attribute vec3 aPosition; attribute vec3 aNormal; attribute vec3 aColour; varying vec3 vP; varying vec3 vN; varying vec3 vC; void main(){vP=aPosition;vN=aNormal;vC=aColour;gl_Position=uVP*vec4(aPosition,1.0);}";
-        String fragment="precision mediump float; varying vec3 vP; varying vec3 vN; varying vec3 vC; uniform vec3 uEye; void main(){vec3 n=normalize(vN);vec3 l=normalize(vec3(-.4,1.0,.7));float d=max(dot(n,l),0.0);float spec=pow(max(dot(n,normalize(l+normalize(uEye-vP))),0.0),48.0);vec3 c=vC*(.48+.52*d)+vec3(.24)*spec;float fog=clamp(length(uEye-vP)/35.0,0.0,.35);gl_FragColor=vec4(mix(c,vec3(.055,.13,.18),fog),1.0);}";
+        String fragment="precision mediump float; varying vec3 vP; varying vec3 vN; varying vec3 vC; uniform vec3 uEye; uniform float uJelly; uniform float uClarity; void main(){"
+            +"vec3 n=normalize(vN); if(!gl_FrontFacing)n=-n; vec3 v=normalize(uEye-vP); vec3 l=normalize(vec3(-.4,1.0,.7)); float d=max(dot(n,l),0.0);"
+            +"float spec=pow(max(dot(n,normalize(l+v)),0.0),64.0); float fog=clamp(length(uEye-vP)/35.0,0.0,.35);"
+            +"if(uJelly<.5){vec3 c=vC*(.48+.52*d)+vec3(.24)*spec;gl_FragColor=vec4(mix(c,vec3(.055,.13,.18),fog),1.0);return;}"
+            +"float facing=abs(dot(n,v));float fresnel=pow(1.0-facing,3.0);vec3 r=reflect(-v,n);"
+            +"float panel=pow(max(dot(r,normalize(vec3(-.5,1.0,.65))),0.0),45.0);float strip=pow(max(dot(r,normalize(vec3(.8,.5,-.4))),0.0),100.0);"
+            +"float alpha=clamp(mix(.80,.23,uClarity)+fresnel*.38,.20,.95);vec3 tint=vC*(.58+.32*d)+vC*pow(max(dot(-n,l),0.0),2.0)*.18;"
+            +"vec3 coat=vec3(.85,.96,1.0)*(panel*.65+strip*.5+spec*.45+fresnel*.14);"
+            +"gl_FragColor=vec4(mix(tint,vec3(.055,.13,.18),fog)*alpha+coat*(1.0-fog*.5),alpha);}";
         program=GLES20.glCreateProgram();GLES20.glAttachShader(program,shader(GLES20.GL_VERTEX_SHADER,vertex));GLES20.glAttachShader(program,shader(GLES20.GL_FRAGMENT_SHADER,fragment));GLES20.glLinkProgram(program);
         int[] ok=new int[1];GLES20.glGetProgramiv(program,GLES20.GL_LINK_STATUS,ok,0);if(ok[0]==0)throw new IllegalStateException(GLES20.glGetProgramInfoLog(program));
-        positionLoc=GLES20.glGetAttribLocation(program,"aPosition");normalLoc=GLES20.glGetAttribLocation(program,"aNormal");colourLoc=GLES20.glGetAttribLocation(program,"aColour");matrixLoc=GLES20.glGetUniformLocation(program,"uVP");eyeLoc=GLES20.glGetUniformLocation(program,"uEye");
+        positionLoc=GLES20.glGetAttribLocation(program,"aPosition");normalLoc=GLES20.glGetAttribLocation(program,"aNormal");colourLoc=GLES20.glGetAttribLocation(program,"aColour");matrixLoc=GLES20.glGetUniformLocation(program,"uVP");eyeLoc=GLES20.glGetUniformLocation(program,"uEye");jellyLoc=GLES20.glGetUniformLocation(program,"uJelly");clarityLoc=GLES20.glGetUniformLocation(program,"uClarity");
         GLES20.glEnable(GLES20.GL_DEPTH_TEST);GLES20.glEnable(2884);last=0;
     }
     private static int shader(int type,String code){int s=GLES20.glCreateShader(type);GLES20.glShaderSource(s,code);GLES20.glCompileShader(s);int[] ok=new int[1];GLES20.glGetShaderiv(s,GLES20.GL_COMPILE_STATUS,ok,0);if(ok[0]==0)throw new IllegalStateException(GLES20.glGetShaderInfoLog(s));return s;}
@@ -46,13 +55,10 @@ public final class RoomRenderer implements GLSurfaceView.Renderer {
     public void reset(){body.reset();yaw=.48f;pitch=.42f;distance=11.5f;last=0;camera();}
     @Override public void onDrawFrame(GL10 gl){
         long now=System.nanoTime();float dt=last==0?0:Math.min((now-last)*1e-9f,.05f);last=now;body.softness=softness;body.gravity=gravity;body.advance(dt);camera();
-        GLES20.glClearColor(.047f,.105f,.15f,1);GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT|GLES20.GL_DEPTH_BUFFER_BIT);used=0;
+        GLES20.glDepthMask(true);GLES20.glDisable(GLES20.GL_BLEND);GLES20.glCullFace(GLES20.GL_BACK);GLES20.glClearColor(.047f,.105f,.15f,1);GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT|GLES20.GL_DEPTH_BUFFER_BIT);used=0;
         room();
         // A subtle projected contact shadow makes height legible without hiding the mesh.
         float[] centre=body.centre();ellipsoid(centre[0],.03f,centre[2],1.25f,.001f,.65f,0xFF163C47);
-        java.util.Arrays.fill(normals,0);
-        for(int i=0;i<body.triangles.length;i+=3){int a=body.triangles[i]*3,b=body.triangles[i+1]*3,c=body.triangles[i+2]*3;float[] p=body.position;float ux=p[b]-p[a],uy=p[b+1]-p[a+1],uz=p[b+2]-p[a+2],vx=p[c]-p[a],vy=p[c+1]-p[a+1],vz=p[c+2]-p[a+2];float nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;for(int node:new int[]{a,b,c}){normals[node]+=nx;normals[node+1]+=ny;normals[node+2]+=nz;}}
-        for(int index:body.triangles){int a=index*3;float n=(float)Math.sqrt(normals[a]*normals[a]+normals[a+1]*normals[a+1]+normals[a+2]*normals[a+2]);if(n<1e-8)n=1;vertex(body.position[a],body.position[a+1],body.position[a+2],normals[a]/n,normals[a+1]/n,normals[a+2]/n,colour);}
         for(int side=-1;side<=1;side+=2){
             float[] e=attach(1.02f,.12f,side*.385f);ellipsoid(e[0],e[1],e[2],.072f,.09f,.035f,0xFF092B3C);ellipsoid(e[0]+.015f,e[1]+.027f,e[2]+side*.028f,.022f,.025f,.012f,0xFFFFFFFF);
             for(int i=0;i<10;i++){float t=i/9f;float[] m=attach(1.04f+t*.47f,-.11f-(float)Math.sin(t*Math.PI)*.045f,side*(.40f-t*.19f));ellipsoid(m[0],m[1],m[2],.03f,.014f,.016f,0xFF1A6575);}
@@ -60,10 +66,22 @@ public final class RoomRenderer implements GLSurfaceView.Renderer {
         ellipsoid(body.ball[0],body.ball[1],body.ball[2],.42f,.42f,.42f,0xFFFFAA86);
         // Gold stripe on the ball gives rotation-free depth and a distinctive pick target.
         ellipsoid(body.ball[0],body.ball[1]+.25f,body.ball[2],.33f,.06f,.33f,0xFFFFD398);
+        int opaqueVertices=used/9;
+        java.util.Arrays.fill(normals,0);
+        for(int i=0;i<body.triangles.length;i+=3){int a=body.triangles[i]*3,b=body.triangles[i+1]*3,c=body.triangles[i+2]*3;float[] p=body.position;float ux=p[b]-p[a],uy=p[b+1]-p[a+1],uz=p[b+2]-p[a+2],vx=p[c]-p[a],vy=p[c+1]-p[a+1],vz=p[c+2]-p[a+2];float nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;for(int node:new int[]{a,b,c}){normals[node]+=nx;normals[node+1]+=ny;normals[node+2]+=nz;}}
+        for(int index:body.triangles){int a=index*3;float n=(float)Math.sqrt(normals[a]*normals[a]+normals[a+1]*normals[a+1]+normals[a+2]*normals[a+2]);if(n<1e-8)n=1;vertex(body.position[a],body.position[a+1],body.position[a+2],normals[a]/n,normals[a+1]/n,normals[a+2]/n,colour);}
         buffer.clear();buffer.put(data,0,used).position(0);GLES20.glUseProgram(program);GLES20.glUniformMatrix4fv(matrixLoc,1,false,vp,0);GLES20.glUniform3fv(eyeLoc,1,eye,0);
         buffer.position(0);GLES20.glVertexAttribPointer(positionLoc,3,GLES20.GL_FLOAT,false,36,buffer);GLES20.glEnableVertexAttribArray(positionLoc);
         buffer.position(3);GLES20.glVertexAttribPointer(normalLoc,3,GLES20.GL_FLOAT,false,36,buffer);GLES20.glEnableVertexAttribArray(normalLoc);
-        buffer.position(6);GLES20.glVertexAttribPointer(colourLoc,3,GLES20.GL_FLOAT,false,36,buffer);GLES20.glEnableVertexAttribArray(colourLoc);GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,used/9);
+        buffer.position(6);GLES20.glVertexAttribPointer(colourLoc,3,GLES20.GL_FLOAT,false,36,buffer);GLES20.glEnableVertexAttribArray(colourLoc);
+        GLES20.glUniform1f(jellyLoc,0);GLES20.glDrawArrays(GLES20.GL_TRIANGLES,0,opaqueVertices);
+        // Opaque room/props first, then premultiplied translucent back and front surfaces.
+        // Keep depth testing against props but do not let one jelly layer hide another.
+        GLES20.glUniform1f(jellyLoc,1);GLES20.glUniform1f(clarityLoc,SoftBody3D.clamp(clarity,0,1));
+        GLES20.glEnable(GLES20.GL_BLEND);GLES20.glBlendFunc(GLES20.GL_ONE,GLES20.GL_ONE_MINUS_SRC_ALPHA);GLES20.glDepthMask(false);
+        GLES20.glCullFace(GLES20.GL_FRONT);GLES20.glDrawArrays(GLES20.GL_TRIANGLES,opaqueVertices,used/9-opaqueVertices);
+        GLES20.glCullFace(GLES20.GL_BACK);GLES20.glDrawArrays(GLES20.GL_TRIANGLES,opaqueVertices,used/9-opaqueVertices);
+        GLES20.glDepthMask(true);GLES20.glDisable(GLES20.GL_BLEND);
     }
     private float[] attach(float x,float y,float z){float[] p=new float[3];float total=0;for(int i=0;i<156;i++){float dx=body.rest[i*3]-x,dy=body.rest[i*3+1]-y,dz=body.rest[i*3+2]-z;float d=dx*dx+dy*dy+dz*dz;float w=1/(d*d+.0001f);total+=w;for(int k=0;k<3;k++)p[k]+=(body.position[i*3+k]-body.rest[i*3+k])*w;}p[0]=x+p[0]/total;p[1]=y+p[1]/total;p[2]=z+p[2]/total;return p;}
     private void room(){
