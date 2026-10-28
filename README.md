@@ -1,49 +1,81 @@
-# Jelly Dolphin
+# Jelly Dolphin — 3D Jelly Room
 
-An offline native Android pocket toy. Tap a glossy dolphin to squish it, drag and
-release to throw it, and watch its spring-driven body and tail wobble as it bounces
-against the playground walls. Six colours, adjustable squishiness, optional gravity,
-a Shake button, device-shake support, and saved appearance/physics preferences.
-No accounts, network permissions, external services, or runtime dependencies.
+A native, offline Android toy with a **volumetric 3D dolphin**, a small room, and
+particle-based jiggle physics. No account, Internet access, or game-engine download
+is needed to play.
 
-## Install
+![3D room rendered by the GLES validation test](docs/3d-room.png)
 
-The directly installable testing APK is `dist/jelly-dolphin-1.0.apk`.
-Copy it to an Android 6.0+ device, open it, and allow installation from the app you
-used to open the file when Android prompts. This is a debug-signed testing build,
-not a Play Store release. Keep a dedicated private release signing key for publishing;
-never commit signing credentials. With an attached device:
+## Install version 2.0
+
+Download [`dist/jelly-dolphin-2.0.apk`](dist/jelly-dolphin-2.0.apk) on an Android
+6.0+ phone supporting OpenGL ES 2.0. Open it and allow installation from your
+browser/file manager when prompted. This is a debug-signed testing build, not a
+Play Store release. Version 1.0 is retained in `dist` for comparison.
+
+## Play
+
+- **Drag the dolphin** to grab a point on its mesh, lift, stretch, and throw it.
+- **Tap the dolphin** to send a local impulse through its body, fins, and tail.
+- **Pinch while holding an object** to move it toward or away from the camera.
+- Use **Depth** to move the dolphin along the room's front/back axis.
+- **Drag empty space** to orbit the camera; **pinch empty space** to zoom.
+- **Tap or drag the peach ball**. It bounces and interacts with the dolphin.
+- Floor, walls, ceiling boundary, and raised blocks constrain the particles.
+- Choose from six colours, change squishiness, toggle gravity, or use **Shake**.
+- **Reset** restores the dolphin, ball, and camera. **How to play** explains gestures.
+- Colour, squishiness, and gravity are remembered after reopening the app.
+
+## Build
+
+JDK 21, Android SDK 35, build-tools 35.0.0, AGP 8.9.2; checksum-pinned Gradle 8.13.
+No third-party application dependencies. The app uses the Android OpenGL ES API.
 
 ```sh
-adb install -r dist/jelly-dolphin-1.0.apk
-```
-
-## Build and test
-
-Use JDK 21, Android SDK platform 35 and build-tools 35.0.0. The Gradle wrapper pins
-Gradle 8.13 and verifies its SHA-256. No third-party application dependencies.
-
-```sh
-# In this cloud environment:
-bash scripts/setup-cloud.sh
+# Cloud environment toolchain, already prepared:
 source /workspace/toolchains/activate.sh
-# On a normal development machine, set JAVA_HOME and ANDROID_HOME instead.
+# Refresh installation if needed:
+bash scripts/setup-cloud.sh
+# From this checkout:
 ./gradlew --no-daemon --max-workers=2 assembleDebug lintDebug
 ./scripts/test-physics.sh
+./scripts/test-scene.sh
 ```
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
-Lint report: `app/build/reports/lint-results-debug.html`.
-The standalone physics suite checks taps, damping, collision impulses, gravity,
-drag following, release momentum, softness, reset, and long-run numerical stability.
+On another machine, set `JAVA_HOME` and `ANDROID_HOME` to your JDK and Android SDK.
+APK output is `app/build/outputs/apk/debug/app-debug.apk`.
+The optional host rendering test needs Java, Python with NumPy/Pillow, and Mesa
+EGL supporting a surfaceless GLES 2 context. It writes `build/scene/room.png`.
 
-## Implementation
+With a working emulator or attached test phone:
 
-`JellyPhysics` integrates position and damped deformation springs in fixed substeps.
-`DolphinView` renders vector curves with the same deformation field applied to the
-outline, flippers, belly, eyes, and smile. It uses a single-pointer spring anchor
-and bounded release velocity. Animation and sensors pause with the activity.
-`MainActivity` supplies accessible native controls and persists preferences.
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.jellydolphin.app/.MainActivity
+./scripts/smoke-device.sh
+python3 tests/device-interactions.py
+```
 
-The initial UI is English and designed for portrait phones. Device-shake behaviour
-and haptics require suitable hardware. See `VALIDATION.md` for checks actually run.
+## Implementation and limits
+
+`SoftBody3D` simulates 436 surface particles with XPBD distance constraints,
+interior thickness braces, and body-to-fin connections. The solver uses fixed
+120 Hz substeps, iterative contact projection, damping, bounded velocities, and
+compliance controlled by squishiness. Every body/fin/tail vertex is simulated.
+This is a position-based spring lattice; it does not simulate fluid flow or
+self-collision, and extreme squeezing can allow parts to intersect.
+
+`RoomRenderer` submits a dynamically deformed triangle mesh to OpenGL ES 2 with
+smooth normals, directional/specular lighting, perspective projection and a
+projected floor shadow. Geometry is generated locally. The ball is a separate
+sphere with gravity, grabbing, boundary/box contacts, and approximate soft-body
+contact impulses. Camera rays pick mesh particles or the ball. Touch commands are
+queued on the GL thread; animation and sensors pause with the activity.
+
+The first 3D version is English and designed for portrait phones. The floor
+shadow is a visual approximation. Very fast movement can tunnel through thin
+obstacles because collision detection is discrete. Physical shaking and haptics
+need suitable hardware. See [VALIDATION.md](VALIDATION.md) for checks actually run.
+
+Use a separate private release signing key for store distribution. Never commit
+signing credentials.
